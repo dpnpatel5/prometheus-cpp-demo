@@ -11,7 +11,7 @@ int main() {
     int sock = 0;
     struct sockaddr_in serv_addr;
     char buffer[BUFFER_SIZE] = {0};
-    std::string message = "Hello, Server!";
+    std::string message;
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         std::cerr << "Socket creation error" << std::endl;
@@ -31,12 +31,23 @@ int main() {
         return -1;
     }
 
-    send(sock, message.c_str(), message.size(), 0);
-    std::cout << "Message sent to server: " << message << std::endl;
+    while (true) {
+        std::cout << "Enter message to send to server (type 'exit' to quit): ";
+        std::getline(std::cin, message);
+        
+        if (message == "exit") {
+            break;
+        }
 
-    ssize_t valread = read(sock, buffer, BUFFER_SIZE);
-    if (valread > 0) {
-        std::cout << "Received from server: " << buffer << std::endl;
+        send(sock, message.c_str(), message.size(), 0);
+        std::cout << "Message sent to server: " << message << std::endl;
+
+        ssize_t valread = read(sock, buffer, BUFFER_SIZE);
+        if (valread > 0) {
+            std::cout << "Received from server: " << buffer << std::endl;
+        }
+
+        memset(buffer, 0, BUFFER_SIZE); // Clear the buffer
     }
 
     close(sock);

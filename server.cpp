@@ -11,25 +11,37 @@
 #include "prometheus/exposer.h"
 #include "prometheus/registry.h"
 #include "prometheus/histogram.h"
+#include "prometheus/gauge.h"
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
-void handle_client(int client_socket, prometheus::Counter& request_counter, prometheus::Histogram& response_histogram) {
+void handle_client(int client_socket, prometheus::Counter& request_counter, prometheus::Histogram& response_histogram, prometheus::Counter& bytes_sent_counter, prometheus::Counter& bytes_received_counter, prometheus::Gauge& active_connections) {
     char buffer[BUFFER_SIZE] = {0};
 
-    auto start_time = std::chrono::steady_clock::now();
-    ssize_t valread = read(client_socket, buffer, BUFFER_SIZE);
-    if (valread > 0) {
+    while (true) {
+        auto start_time = std::chrono::steady_clock::now();
+        ssize_t valread = read(client_socket, buffer, BUFFER_SIZE);
+
+        if (valread <= 0) {
+            break; // Exit the loop if the client disconnects or there's an error
+        }
+
         std::cout << "Received: " << buffer << std::endl;
         send(client_socket, buffer, strlen(buffer), 0);
+        bytes_received_counter.Increment(valread);
+        bytes_sent_counter.Increment(strlen(buffer));
+
+        auto end_time = std::chrono::steady_clock::now();
+        std::chrono::duration<double> response_time = end_time - start_time;
+        response_histogram.Observe(response_time.count());
+        request_counter.Increment();
+
+        memset(buffer, 0, BUFFER_SIZE); // Clear the buffer
     }
+
     close(client_socket);
-    
-    auto end_time = std::chrono::steady_clock::now();
-    std::chrono::duration<double> response_time = end_time - start_time;
-    response_histogram.Observe(response_time.count());
-    request_counter.Increment();
+    active_connections.Decrement();
 }
 
 int main() {
@@ -46,6 +58,18 @@ int main() {
                                    .Name("response_time_seconds")
                                    .Help("Response times in seconds")
                                    .Register(*registry);
+    auto& bytes_sent_counter_family = BuildCounter()
+                                   .Name("bytes_sent_total")
+                                   .Help("Total number of bytes sent to clients")
+                                   .Register(*registry);
+    auto& bytes_received_counter_family = BuildCounter()
+                                      .Name("bytes_received_total")
+                                      .Help("Total number of bytes received from clients")
+                                      .Register(*registry);
+    auto& active_connections_gauge_family = BuildGauge()
+                                       .Name("active_connections")
+                                       .Help("Number of active client connections")
+                                       .Register(*registry);
 
     exposer.RegisterCollectable(registry);
 
@@ -83,12 +107,15 @@ int main() {
             exit(EXIT_FAILURE);
         }
 
-        // Get references to the actual Counter and Histogram from the Families
+        // Get references to the actual metrics from the Families
         auto& request_counter = request_counter_family.Add({});
-        // Specify bucket boundaries when adding Histogram metric
         auto& response_histogram = response_histogram_family.Add({}, Histogram::BucketBoundaries{0.001, 0.01, 0.1, 1.0});
+        auto& bytes_sent_counter = bytes_sent_counter_family.Add({});
+        auto& bytes_received_counter = bytes_received_counter_family.Add({});
+        auto& active_connections = active_connections_gauge_family.Add({});
 
-        std::thread(handle_client, new_socket, std::ref(request_counter), std::ref(response_histogram)).detach();
+        active_connections.Increment();
+        std::thread(handle_client, new_socket, std::ref(request_counter), std::ref(response_histogram), std::ref(bytes_sent_counter), std::ref(bytes_received_counter), std::ref(active_connections)).detach();
     }
 
     close(server_fd);
