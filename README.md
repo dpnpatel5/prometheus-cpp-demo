@@ -23,6 +23,8 @@ A demonstration of using Prometheus for monitoring metrics in a C++ client-serve
    ```bash
    ./prometheus --config.file=prometheus.yml
    ```
+4. **Prometheus Component**:
+   Refer [Prometheus Components](https://prometheus.io/download/).
 ### Build
 
    ```bash
